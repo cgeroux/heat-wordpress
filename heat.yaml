@@ -1,0 +1,191 @@
+heat_template_version: 2015-04-30
+
+description: Sets up a wordpress server
+
+parameter_groups:
+  - label: Other
+    description: Other parameters
+    parameters:
+    - title
+    - admin-user
+    - admin-password
+    - admin-email
+    - flavor
+    - image
+    - key
+    - volume_name
+    - volume_size
+    - private_network
+    - public_network
+
+parameters:
+  title:
+    type: string
+    label: Wordpress site name
+    description: Name of the Wordpress site
+    default: "CC User Wordpress site"
+  admin-user:
+    type: string
+    label: Admin username
+    description: The account name of the wordpress site administrator.
+  admin-password:
+    type: string
+    label: Admin password
+    description: The password for the administrator account.
+    hidden: true
+    constraints:
+      - length: {min: 16, max: 32 }
+        description: Password length must be between 16 and 32 characters.
+      - allowed_pattern: '[a-zA-Z0-9 ]+'
+        description: Password must contain only letters, numbers, and spaces.
+  admin-email:
+    type: string
+    label: Admin email
+    description: Email for site administrator
+    constraints:
+      - allowed_pattern: '^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$'
+  flavor:
+    type: string
+    label: Flavor
+    description: Hardware flavor to be used for the server,  it is best to select a flavor starting with a "p" for persistent
+    default: p1-0.75gb
+    constraints:
+      - custom_constraint: nova.flavor
+  image:
+    type: string
+    label: Image
+    description: Base image to use to install wordpress on, it is best to select "Ubuntu-16.04.2-Xenial-x64-2017-07" others may work but haven't been tested.
+    default: Ubuntu-16.04.2-Xenial-x64-2017-07
+    constraints:
+      - custom_constraint: glance.image
+  key:
+    type: string
+    label: Key-pair name
+    description: Name of a previously generated key-pair in OpenStack to be used when connecting to the server via ssh. Usefull for performing maintance tasks.
+    constraints:
+      - custom_constraint: nova.keypair
+  volume_name:
+    type: string
+    label: Volume Name
+    default: wordpress_root
+    description: Name of the volume to boot from. A new volume will be created.
+  volume_size:
+    type: number
+    label: Volume Size
+    default: 20
+    description: Size of the volume in GB
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    constraints:
+      - custom_constraint: neutron.network
+  public_network:
+    type: string
+    description: Network to use for obtaining public IP (VLAN3337 for west-cloud, net04_ext for east-cloud)
+    label: Public Network
+    default: net04_ext
+    constraints:
+      - allowed_values:
+        - VLAN3337
+        - net04_ext
+resources:
+  wordpress-server:
+    type: OS::Nova::Server
+    properties:
+      flavor: {get_param: flavor}
+      key_name: {get_param: key}
+      name: wordpress-server
+      block_device_mapping: [{device_name: "vda", volume_id: {get_resource: wordpress_volume}, delete_on_termination: "false"}]
+      networks:
+        - port: {get_resource: wordpress_port}
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          template: |
+            #cloud-config
+            package_update: true
+            package_upgrade: true
+            packages:
+              - apache2
+              - git
+              - php5
+              - mysql-server
+              - php5-mysql
+              - php5-apcu
+              - php5-gd
+              - php5-intl
+            write_files:
+              - content: |
+                  #!/bin/bash
+                  wc_notify --data-binary '{"status": "SUCCESS", "reason": "mediawiki server CI done"}'
+                path: /tmp/finished.sh
+                permissions: "0755"
+            runcmd:
+              - echo -n "127.0.1.1 " >>/etc/hosts
+              - cat /etc/hostname >> /etc/hosts
+              - ["cd","/tmp"]
+              - ["git","clone","https://github.com/cgeroux/cloud-init-mediawiki.git"]
+              - ["/tmp/cloud-init-mediawiki/mediawiki-setup.py","--wiki-version","WIKIVERSION","--wiki-patch","WIKIPATCH","--name","WIKINAME","--read-permission","READPERMISSION","--edit-permission","EDITPERMISSION","--account-create-permission","ACCCREATEPERMISSION","--admin-user","ADMINUSER","--uploads","UPLOADS","--ssl","SSL","--logo-url","LOGOURL","SERVERADDRESS"]
+              - bash /tmp/finished.sh
+          params:
+            TITLE: {get_param: title}
+            ADMINUSER: {get_param: admin-user}
+            SERVERADDRESS: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
+            wc_notify: {get_attr: ['wordpress_wait_handle','curl_cli']}
+  wordpress_port:
+    type: OS::Neutron::Port
+    properties:
+      network: {get_param: private_network}
+      security_groups: [{get_resource: wordpress_security},default]
+  wordpress_security:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: wordpress_security
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+  wordpress_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      port_id: {get_resource: wordpress_port}
+      floating_network: {get_param: public_network}
+  wordpress_wait_handle:
+    type: OS::Heat::WaitConditionHandle
+  wordpress_wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: {get_resource: wordpress_wait_handle}
+      count: 1
+      timeout: 1200
+  wordpress_volume:
+    type: OS::Cinder::Volume
+    properties:
+      size: {get_param: volume_size}
+      image: {get_param: image}
+      name: {get_param: volume_name}
+outputs:
+  Admin_acct_info:
+    description: 
+    value: " "
+  public_ip:
+    description: Floating IP address of server, can be used to ssh into server
+    value: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
+  wordpress-url:
+    description: Link to wordpress site
+    value:
+      str_replace:
+        template: http://<hostip>
+        params:
+          <hostip>: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
+
