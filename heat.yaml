@@ -234,7 +234,7 @@ resources:
                   chmod +x wp-cli.phar
                   mv wp-cli.phar /usr/local/bin/wp
                   
-                  sudo systemctl restart apache2
+                  systemctl restart apache2
                   
                   #do initial setup of wordpress
                   echo "performing initial setup of wordpress site ..."
@@ -257,14 +257,16 @@ resources:
                   echo "enabled = true">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "filter = wordpress-soft">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "logpath = /var/log/auth.log">>/etc/fail2ban/jail.d/wordpress.conf
-                  echo "maxretry = 3">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "maxretry = 5">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "port = http,https">>/etc/fail2ban/jail.d/wordpress.conf
+                  
+                  service fail2ban restart
                   
                   #disable use of xmlrpc multicall function to amplify brute force attempts
                   #this causes problems with wp cli, so must be done after all the wp cli stuff is done
                   echo "add_filter('xmlrpc_enabled', '__return_false');">>$TMP_DIR/wordpress/wp-config.php
                   
-                  sudo systemctl restart apache2
+                  systemctl restart apache2
                   
                 path: /tmp/bootstrap-wp.sh
                 permissions: "0755"
