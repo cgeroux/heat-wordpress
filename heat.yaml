@@ -27,11 +27,11 @@ parameters:
   admin-user:
     type: string
     label: Admin username
-    description: The account name of the wordpress site administrator. Please do not use common administrator account names such as "Admin". Note that if you try to login once with a non-existent username you will be banned from accessing the site for a period of time.
+    description: The account name of the wordpress site administrator. Please do not use common administrator account names such as "Admin". Note that if you try to login once with a non-existent username you will be banned from accessing your wordpress site for a period of time.
   admin-password:
     type: string
     label: Admin password
-    description: The password for the administrator account. It must be at least 16 characters long to a maximum of 32 characters. It can contain upper and lower case letters and numbers; no spaces are allowed. Note that if you incorrectly enter your password 6 or more times, you will be banned for a period of time from accessing the site.
+    description: The password for the administrator account. It must be at least 16 characters long to a maximum of 32 characters. It can contain upper and lower case letters and numbers; no spaces are allowed. Note that if you incorrectly enter your password 6 or more times, you will be banned for a period of time from accessing your wordpress site.
     hidden: true
     constraints:
       - length: {min: 16, max: 32 }
