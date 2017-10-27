@@ -27,11 +27,11 @@ parameters:
   admin-user:
     type: string
     label: Admin username
-    description: The account name of the wordpress site administrator.
+    description: The account name of the wordpress site administrator. Please do not use common administrator account names such as "Admin". Note that if you try to login once with a non-existent username you will be banned from accessing the site for a period of time.
   admin-password:
     type: string
     label: Admin password
-    description: The password for the administrator account.
+    description: The password for the administrator account. It must be at least 16 characters long to a maximum of 32 characters. It can contain upper and lower case letters and numbers; no spaces are allowed. Note that if you incorrectly enter your password 6 or more times, you will be banned for a period of time from accessing the site.
     hidden: true
     constraints:
       - length: {min: 16, max: 32 }
@@ -215,7 +215,6 @@ resources:
                   echo "define('FTP_USER','wp-user');">>$TMP_DIR/wordpress/wp-config.php
                   echo "define('FTP_PASS','');">>$TMP_DIR/wordpress/wp-config.php
                   echo "define('FTP_HOST','127.0.0.1:22');">>$TMP_DIR/wordpress/wp-config.php
-                  #echo "define('FS_METHOD', 'direct');">>$TMP_DIR/wordpress/wp-config.php
                   
                   echo "moving install from $TMP_DIR/wordpress/ to /var/www/html/ ..."
                   rm /var/www/html/index.html
@@ -272,7 +271,7 @@ resources:
                 permissions: "0755"
               - content: |
                   #!/bin/bash
-                  wc_notify --data-binary '{"status": "SUCCESS", "reason": "mediawiki server CI done"}'
+                  wc_notify --data-binary '{"status": "SUCCESS", "reason": "wordpress server CI done"}'
                 path: /tmp/finished.sh
                 permissions: "0755"
             runcmd:
