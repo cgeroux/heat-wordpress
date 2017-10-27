@@ -36,8 +36,8 @@ parameters:
     constraints:
       - length: {min: 16, max: 32 }
         description: Password length must be between 16 and 32 characters.
-      - allowed_pattern: '[a-zA-Z0-9 ]+'
-        description: Password must contain only letters, numbers, and spaces.
+      - allowed_pattern: '[a-zA-Z0-9]+'
+        description: Password must contain only letters, numbers.
   admin-email:
     type: string
     label: Admin email
@@ -238,7 +238,7 @@ resources:
                   
                   #do initial setup of wordpress
                   echo "performing initial setup of wordpress site ..."
-                  su - wp-user -c "cd /var/www/html;wp core install --url=http://$(curl http://ipv4.icanhazip.com/) --title='$WP_TITLE' --admin_user='$WP_ADMIN_USER' --admin_password='$WP_ADMIN_PASSWD' --admin_email='$WP_ADMIN_EMAIL'"
+                  su - wp-user -c "cd /var/www/html;wp core install --url=https://$(curl http://icanhazptr.com/) --title='$WP_TITLE' --admin_user='$WP_ADMIN_USER' --admin_password='$WP_ADMIN_PASSWD' --admin_email='$WP_ADMIN_EMAIL'"
                   
                   #install plugin to log wordpress authentication attempts
                   su - wp-user -c "cd /var/www/html; wp plugin install wp-fail2ban; wp plugin activate wp-fail2ban"
@@ -276,10 +276,10 @@ resources:
             runcmd:
               - echo -n "127.0.1.1 ">>/etc/hosts
               - cat /etc/hostname>>/etc/hosts
-              - bash /tmp/bootstrap-wp.sh
               - ["cd","/tmp"]
               - ["git","clone","https://github.com/cgeroux/heat-wordpress.git"]
               - ["/tmp/heat-wordpress/self-signed-ssl-setup.py","SERVERADDRESS"]
+              - bash /tmp/bootstrap-wp.sh
               - bash /tmp/finished.sh
           params:
             TITLE: {get_param: title}
