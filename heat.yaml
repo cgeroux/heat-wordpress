@@ -43,19 +43,18 @@ parameters:
     label: Admin email
     description: Email for site administrator
     constraints:
-      - allowed_pattern: '^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$'
+      - allowed_pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        description: Must be a valid email
   flavor:
     type: string
     label: Flavor
     description: Hardware flavor to be used for the server,  it is best to select a flavor starting with a "p" for persistent
-    default: p1-0.75gb
     constraints:
       - custom_constraint: nova.flavor
   image:
     type: string
     label: Image
     description: Base image to use to install wordpress on, it is best to select "Ubuntu-16.04.2-Xenial-x64-2017-07" others may work but haven't been tested.
-    default: Ubuntu-16.04.2-Xenial-x64-2017-07
     constraints:
       - custom_constraint: glance.image
   key:
@@ -108,30 +107,187 @@ resources:
             package_upgrade: true
             packages:
               - apache2
-              - git
-              - php5
               - mysql-server
-              - php5-mysql
-              - php5-apcu
-              - php5-gd
-              - php5-intl
+              - php
+              - php-dev
+              - libapache2-mod-php
+              - php-mcrypt
+              - php-mysql
+              - php-curl
+              - php-gd
+              - php-mbstring
+              - php-xml
+              - php-xmlrpc
+              - libssh2-1-dev
+              - php-fpm
+              - fail2ban
             write_files:
+              - content: |
+                  #!/bin/bash
+                  
+                  WP_ADMIN_USER=ADMINUSER
+                  WP_ADMIN_PASSWD=ADMINUSERPASS
+                  WP_ADMIN_EMAIL=ADMINUSEREMAIL
+                  WP_TITLE=SITETITLE
+                  
+                  
+                  #use this version of ssh2 for php, the 
+                  #php-ssh2 package doesn't seem to work, there is a known bug with it.
+                  pecl install ssh2-1.1.2
+                  
+                  #add extension to php.ini
+                  echo "addeding php-ssh2 extension to php.ini ..."
+                  echo "extension=ssh2.so">>/etc/php/7.0/apache2/php.ini
+                  
+                  echo "making DB_PASSWORD ..."
+                  DB_PASSWORD=$(tr -dc _A-Za-z0-9 < /dev/urandom | head -c16) # Generate a random password
+                  DB_NAME="wordpress"
+                  DB_USER="wordpress"
+                  DB_HOST=localhost
+                  
+                  echo "getting latest wordpress ..."
+                  TMP_DIR=/tmp
+                  wget http://wordpress.org/latest.tar.gz -O $TMP_DIR/latest.tar.gz
+                  echo "untarring wordpress ..."
+                  tar xzf $TMP_DIR/latest.tar.gz -C $TMP_DIR
+                  
+                  # create the database, and configure the wordpress user.
+                  echo "configuring database ..."
+                  mysql <<EOF
+                  CREATE DATABASE $DB_NAME;
+                  GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,ALTER
+                  ON $DB_NAME.*
+                  TO $DB_USER@$DB_HOST
+                  IDENTIFIED BY '$DB_PASSWORD';
+                  FLUSH PRIVILEGES;
+                  EOF
+                  
+                  # copy the config file and then configure database name, username, and password
+                  echo "editing the wordpress configuration ..."
+                  cp $TMP_DIR/wordpress/wp-config-sample.php $TMP_DIR/wordpress/wp-config.php
+                  sed -i "s/database_name_here/$DB_NAME/g" $TMP_DIR/wordpress/wp-config.php
+                  sed -i "s/password_here/$DB_PASSWORD/g" $TMP_DIR/wordpress/wp-config.php
+                  sed -i "s/username_here/$DB_USER/g" $TMP_DIR/wordpress/wp-config.php
+                  
+                  # configure security keys : https://codex.wordpress.org/Editing_wp-config.php#Security_Keys
+                  echo "configuring wordpress security keys ..."
+                  for i in $(seq 1 8)
+                  do
+                    key=$(tr -dc _A-Za-z0-9 < /dev/urandom | head -c64)
+                    sed -i "0,/put your unique phrase here/s/put your unique phrase here/$key/" $TMP_DIR/wordpress/wp-config.php
+                  done
+                  
+                  #create a user to manage (update/install plugins) for wordpress
+                  echo "creating user, wp-user, to manage updating/installing plugins for wordpress ..."
+                  adduser --disabled-password wp-user << EOF
+                  wp-user
+                  
+                  
+                  
+                  Y
+                  EOF
+                  
+                  #add wp-user to www-data group
+                  adduser wp-user www-data
+                  
+                  #
+                  ##setup ssh keys for wp-user
+                  echo "setting up wp-user ssh keys ..."
+                  su - wp-user -c "ssh-keygen -t rsa -b 4096 << EOF
+                  /home/wp-user/wp_rsa
+                  
+                  EOF"
+                  
+                  chown wp-user:www-data /home/wp-user/wp_rsa*
+                  chmod 0640 /home/wp-user/wp_rsa*
+                  mkdir /home/wp-user/.ssh
+                  chown wp-user:wp-user /home/wp-user/.ssh/
+                  chmod 0700 /home/wp-user/.ssh/
+                  echo "from=127.0.0.1">/home/wp-user/.ssh/authorized_keys
+                  cat /home/wp-user/wp_rsa.pub >>/home/wp-user/.ssh/authorized_keys
+                  chown wp-user:wp-user /home/wp-user/.ssh/authorized_keys
+                  chmod 0644 /home/wp-user/.ssh/authorized_keys
+                  
+                  #configure wp to use ssh for updates and plugin installation
+                  echo "configuring wordpress to use ssh for updates and installs ..."
+                  echo "define('FTP_PUBKEY','/home/wp-user/wp_rsa.pub');">>$TMP_DIR/wordpress/wp-config.php
+                  echo "define('FTP_PRIKEY','/home/wp-user/wp_rsa');">>$TMP_DIR/wordpress/wp-config.php
+                  echo "define('FTP_USER','wp-user');">>$TMP_DIR/wordpress/wp-config.php
+                  echo "define('FTP_PASS','');">>$TMP_DIR/wordpress/wp-config.php
+                  echo "define('FTP_HOST','127.0.0.1:22');">>$TMP_DIR/wordpress/wp-config.php
+                  #echo "define('FS_METHOD', 'direct');">>$TMP_DIR/wordpress/wp-config.php
+                  
+                  echo "moving install from $TMP_DIR/wordpress/ to /var/www/html/ ..."
+                  rm /var/www/html/index.html
+                  mv $TMP_DIR/wordpress/* /var/www/html/
+                  
+                  #make wp-user owner of wp-site
+                  echo "setting permissions on files/directories in /var/www/html ..."
+                  chown -R wp-user:www-data /var/www/html
+                  chmod u=rwX,g=rX,o=rX -R /var/www/html
+                  find /var/www/html -type d -exec echo chmod u+s,g+s {} \;
+                  chmod o-rx /var/www/html/wp-config.php
+                  
+                  #install wp-cli
+                  echo "installing wp-cli ..."
+                  curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+                  chmod +x wp-cli.phar
+                  mv wp-cli.phar /usr/local/bin/wp
+                  
+                  sudo systemctl restart apache2
+                  
+                  #do initial setup of wordpress
+                  echo "performing initial setup of wordpress site ..."
+                  su - wp-user -c "cd /var/www/html;wp core install --url=http://$(curl http://ipv4.icanhazip.com/) --title='$WP_TITLE' --admin_user='$WP_ADMIN_USER' --admin_password='$WP_ADMIN_PASSWD' --admin_email='$WP_ADMIN_EMAIL'"
+                  
+                  #install plugin to log wordpress authentication attempts
+                  su - wp-user -c "cd /var/www/html; wp plugin install wp-fail2ban; wp plugin activate wp-fail2ban"
+                  
+                  #install fail2ban wordpress filters
+                  cp /var/www/html/wp-content/plugins/wp-fail2ban/filters.d/wordpress-hard.conf /etc/fail2ban/filter.d/
+                  cp /var/www/html/wp-content/plugins/wp-fail2ban/filters.d/wordpress-soft.conf /etc/fail2ban/filter.d/
+                  echo "[wordpress-hard]">/etc/fail2ban/jail.d/wordpress.conf
+                  echo "enabled = true">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "filter = wordpress-hard">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "logpath = /var/log/auth.log">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "maxretry = 1">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "port = http,https">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "[wordpress-soft]">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "enabled = true">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "filter = wordpress-soft">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "logpath = /var/log/auth.log">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "maxretry = 3">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "port = http,https">>/etc/fail2ban/jail.d/wordpress.conf
+                  
+                  #disable use of xmlrpc multicall function to amplify brute force attempts
+                  #this causes problems with wp cli, so must be done after all the wp cli stuff is done
+                  echo "add_filter('xmlrpc_enabled', '__return_false');">>$TMP_DIR/wordpress/wp-config.php
+                  
+                  sudo systemctl restart apache2
+                  
+                path: /tmp/bootstrap-wp.sh
+                permissions: "0755"
               - content: |
                   #!/bin/bash
                   wc_notify --data-binary '{"status": "SUCCESS", "reason": "mediawiki server CI done"}'
                 path: /tmp/finished.sh
                 permissions: "0755"
             runcmd:
-              - echo -n "127.0.1.1 " >>/etc/hosts
-              - cat /etc/hostname >> /etc/hosts
+              - echo -n "127.0.1.1 ">>/etc/hosts
+              - cat /etc/hostname>>/etc/hosts
+              - bash /tmp/bootstrap-wp.sh
               - ["cd","/tmp"]
-              - ["git","clone","https://github.com/cgeroux/cloud-init-mediawiki.git"]
-              - ["/tmp/cloud-init-mediawiki/mediawiki-setup.py","--wiki-version","WIKIVERSION","--wiki-patch","WIKIPATCH","--name","WIKINAME","--read-permission","READPERMISSION","--edit-permission","EDITPERMISSION","--account-create-permission","ACCCREATEPERMISSION","--admin-user","ADMINUSER","--uploads","UPLOADS","--ssl","SSL","--logo-url","LOGOURL","SERVERADDRESS"]
+              - ["git","clone","https://github.com/cgeroux/heat-wordpress.git"]
+              - ["/tmp/heat-wordpress/self-signed-ssl-setup.py","SERVERADDRESS"]
               - bash /tmp/finished.sh
           params:
             TITLE: {get_param: title}
             ADMINUSER: {get_param: admin-user}
+            ADMINUSERPASS: {get_param: admin-password}
             SERVERADDRESS: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
+            ADMINUSEREMAIL: {get_param: admin-email}
+            SITETITLE: {get_param: title}
             wc_notify: {get_attr: ['wordpress_wait_handle','curl_cli']}
   wordpress_port:
     type: OS::Neutron::Port

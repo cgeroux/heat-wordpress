@@ -18,7 +18,7 @@ def parseOptions():
   parser=op.OptionParser(usage="Usage %prog SERVER"
     ,version="%prog 1.0",description="Sets up wordpress."
     +"SERVER is the base url for the server, this should be your domain name "
-    +"which points to your machines IP, or your machines IP if you don't have "
+    +"which points to your machine's IP, or your machine's IP if you don't have "
     +"a domain name. This script should probably be run with sudo as it will "
     +"likely have to edit and read files which aren't editable or perhaps "
     +"not even readable by standard users.")
@@ -26,19 +26,6 @@ def parseOptions():
   parser.add_option("--dry-run",dest="dryRun",action="store_true",default=False
     ,help="If set will not actually do anything, only print out what it would "
     +"have done [not default]")
-  parser.add_option("--title",dest="title",action="store"
-    ,type="string",default="CC User Wordpress site"
-    ,help="Sets the name of the wordpress site [default: %default].")
-  parser.add_option("--admin-user",dest="adminUser",action="store"
-    ,type="string",default=None
-    ,help="Sets administrator user name, by default it is randomly "
-    +"generated.")
-  parser.add_option("--admin-email",dest="adminEmail",action="store"
-    ,type="string",default=None
-    ,help="Sets administrator's email address.")
-  parser.add_option("--ssl",dest="enableSSL",action="store"
-    ,type="string",default="False"
-    ,help="Enables SSL by giving a \"true\" value [default: %default]")
   return parser.parse_args()
 def replaceStrInFile(strMatch,strReplace,fileName,maxOccurs=None):
   """Replace all occurrences of strMatch with strReplace in file fileName
@@ -154,165 +141,6 @@ def execute(func,*args,dry=False,**kwargs):
     commandStr+=")"
     print(commandStr)
     return None
-def setupWordPress(settings={},dry=False):
-  """Downloads media wiki and puts it into document root
-  """
-  
-  (adminName,adminPassWd)=genNameAndPass()
-  (dummy,dbPassWd)=genNameAndPass()
-  
-  defaultSettings={
-    ,"title":"CC User Wordpress site"
-    ,"adminUser":adminName
-    ,"wikiAdminPass":adminPassWd
-    ,"adminEmail":adminPassWd
-    ,"server":"http://127.0.0.1/"
-    ,"documentRoot":"/var/www/html"
-    ,"tmpDir":"/tmp"
-    ,"owner":"www-data"
-    ,"group":"www-data"
-    }
-  
-  #set settings to default if no settings given or if setting is None
-  for key in defaultSettings.keys():
-    
-    if key not in settings.keys():
-      settings[key]=defaultSettings[key]
-    else:
-      if settings[key]==None:
-        settings[key]=defaultSettings[key]
-  
-  #use this version of ssh2 for php, the 
-  #php-ssh2 package doesn't seem to work, there is a known bug with it.
-  execute(subprocess.call,["pecl","install","ssh2-1.1.2"],dry=dry)
-  
-  #add extension to php.ini
-  execute(subprocess.call,["echo","extension=ssh2.so",">>/etc/php/7.0/apache2/php.ini"],dry=dry)
-  
-  '''
-  tmpMediaWikiDir=os.path.join(settings["tmpDir"],"mediawiki-"
-    +settings["version"]+"."+settings["patch"])
-  url="https://releases.wikimedia.org/mediawiki/"+settings["version"] \
-    +"/mediawiki-"+settings["version"]+"."+settings["patch"]+".tar.gz"
-  
-  #download and untar mediawiki
-  execute(subprocess.call,["wget",url,"--directory-prefix="
-    +settings["tmpDir"]],dry=dry)
-  execute(subprocess.call,["tar","-xzf",tmpMediaWikiDir+".tar.gz","-C"
-    ,settings["tmpDir"]],dry=dry)
-  
-  #remove existing files in document root
-  if settings["purgeDocRoot"]:
-    paths=glob.glob(settings["documentRoot"]+"/*")
-    for path in paths:
-      try:
-        execute(os.remove,path,dry=dry)
-      except IsADirectoryError:
-        execute(shutil.rmtree,path,dry=dry)
-  
-  #move files to document root
-  paths=glob.glob(tmpMediaWikiDir+"/*")
-  for path in paths:
-    pathBaseName=os.path.basename(path)
-    execute(shutil.move,path,os.path.join(settings["documentRoot"]
-      ,pathBaseName),dry=dry)
-  
-  #change owner and group
-  for path in paths:
-    pathBaseName=os.path.basename(path)
-    execute(shutil.chown,os.path.join(settings["documentRoot"],pathBaseName)
-      ,user=settings["owner"]
-      ,group=settings["group"],dry=dry)
-  
-  #clean up temporary files
-  if settings["cleanUp"]:
-    execute(os.removedirs,tmpMediaWikiDir,dry=dry)
-    execute(os.remove,tmpMediaWikiDir+".tar.gz",dry=dry)
-  
-  #set mysql root password (initial install has no root password)
-  execute(subprocess.call,["mysqladmin","-u","root","password",settings["dbpass"]],dry=dry)
-  
-  #do basic configure of the wiki
-  execute(subprocess.call,["php"
-    ,os.path.join(settings["documentRoot"],"maintenance/install.php")
-    ,"--scriptpath", ""
-    ,"--pass",settings["wikiAdminPass"]
-    ,"--server",settings["server"]
-    ,"--dbuser",settings["dbuser"]
-    ,"--dbpass",settings["dbpass"]
-    ,"--dbserver",settings["dbserver"]
-    ,settings["wikiName"]
-    ,settings["wikiAdminName"]],dry=dry)
-  
-  localSettingsFile=os.path.join(settings["documentRoot"],"LocalSettings.php")
-  
-  #enable file uploads
-  if settings["enableUploads"]:
-    execute(replaceStrInFile,"$wgEnableUploads = false;"
-      ,"$wgEnableUploads = true;",localSettingsFile,dry=dry)
-  
-  #copy default cc-wiki-logo
-  src=os.path.join(settings["tmpDir"]
-    ,"cloud-init-mediawiki/cc-cloud-wiki-logo.png")
-  dest=os.path.join(settings["documentRoot"]
-    ,"resources/assets/cc-cloud-wiki-logo.png")
-  execute(shutil.copy,src,dest,dry=dry)
-  
-  #set logo
-  execute(replaceStrInFile,
-    "$wgLogo = \"$wgResourceBasePath/resources/assets/wiki.png\";"
-    ,"$wgLogo = \""+settings["logoURL"]+"\";"
-    ,localSettingsFile,dry=dry)
-    
-  #disable emails as no email client is configured
-  execute(replaceStrInFile,"$wgEnableEmail = true;","$wgEnableEmail = false;"
-    ,localSettingsFile,dry=dry)
-  execute(replaceStrInFile,"$wgEnableUserEmail = true;","$wgEnableUserEmail = false;"
-    ,localSettingsFile,dry=dry)
-  
-  
-  #secure LocalSettings.php, only owner needs read access
-  execute(shutil.chown,localSettingsFile,user=settings["owner"]
-    ,group=settings["group"],dry=dry)
-  execute(os.chmod,localSettingsFile,0o400,dry=dry)
-  
-  #Set read permissions
-  if settings["wikiReadPerm"]=="user" or settings["wikiReadPerm"]=="sysop":
-    execute(appendToFile,["$wgGroupPermissions['*']['read'] = false;\n"]
-      ,localSettingsFile,dry=dry)
-    if settings["enableUploads"]:
-      print("WARNING: read permission not public but uploads are enabled."
-        +" The public will still be able to see uploads if they know the "
-        +"correct url to go directly to the file.")
-  if settings["wikiReadPerm"]=="sysop":
-    execute(appendToFile,["$wgGroupPermissions['user']['read'] = false;\n"]
-      ,localSettingsFile,dry=dry)
-    
-  #ensure the login page is always readable
-  execute(appendToFile,["$wgWhitelistRead = array (\"Special:Userlogin\");\n"]
-    ,localSettingsFile,dry=dry)
-  
-  #Set edit permissions
-  if settings["wikiEditPerm"]=="user" or settings["wikiEditPerm"]=="sysop":
-    execute(appendToFile,["$wgGroupPermissions['*']['edit'] = false;\n"]
-      ,localSettingsFile,dry=dry)
-  if settings["wikiEditPerm"]=="sysop":
-    execute(appendToFile,["$wgGroupPermissions['user']['edit'] = false;\n"]
-      ,localSettingsFile,dry=dry)
-  
-  #Set account creation permissions
-  if settings["wikiAccCreatePerm"]=="user" \
-    or settings["wikiAccCreatePerm"]=="sysop":
-    execute(appendToFile,["$wgGroupPermissions['*']['createaccount'] = false;\n"]
-      ,localSettingsFile,dry=dry)
-  if settings["wikiAccCreatePerm"]=="sysop":
-    execute(appendToFile,["$wgGroupPermissions['user']['createaccount'] = false;\n"]
-      ,localSettingsFile,dry=dry)
-  
-  #add any extra configuration options explicitly set
-  execute(appendToFile,settings["extraConfigLines"],localSettingsFile,dry=dry)
-  '''
-  return (settings["wikiAdminName"],settings["wikiAdminPass"],settings)
 def securePHP(dry=False):
   """Ensures some basic php security settings are set
   """
@@ -350,26 +178,6 @@ def secureMySQL(dry=False):
   #is default for mysql on ubuntu 14.0.4
   #bind-address            = 127.0.0.1
   pass
-def secureApache(documentRoot,dry=False):
-  """
-  """
-  
-  #disallow any execution of files in the uploads directory
-  uploadDirSettings=(
-    "<Directory "+os.path.join(documentRoot,"images/")+">\n"
-    "# Ignore .htaccess files\n"
-    "AllowOverride None\n"
-    "\n"
-    "# Serve HTML as plaintext, don't execute SHTML\n"
-    "AddType text/plain .html .htm .shtml .php .phtml .php5\n"
-    "\n"
-    "# Don't run arbitrary PHP code.\n"
-    "php_admin_flag engine off\n"
-    "\n"
-    "# If you've other scripting languages, disable them too.\n"
-    "</Directory>\n")
-  execute(appendToFile,uploadDirSettings,"/etc/apache2/apache2.conf",dry=dry)
-  execute(restartApache,dry=dry)
 def restartApache(dry=False):
   """Restarts apache2
   """
@@ -496,8 +304,8 @@ def main():
   
   #ensure we have the right number of arguments
   if len(args) != 1:
-    raise Exception("Must have at least one argument specifying the "
-      +"server's IP or Domain name")
+    raise Exception("Must have one argument specifying the "
+      +"server's IP or Domain name.")
   
   #set domain name
   domainName=args[0]
@@ -511,11 +319,6 @@ def main():
   
   #map options onto settings
   dryRun=options.dryRun
-  settings={}
-  settings["title"]=options.title
-  settings["adminUser"]=options.adminUser
-  settings["adminEmail"]=options.adminEmail
-  settings["server"]="https://"+domainName
   
   #adjust some php settings to improve security
   #securePHP(dry=dryRun)
@@ -523,18 +326,10 @@ def main():
   #adjust some mysql settings to improve security
   #secureMySQL(dry=dryRun)
   
-  #setup the wiki
-  (adminUser,adminPassWd,settingsUsed)=setupWordPress(
-    settings=settings,dry=dryRun)
-  
   #adjust some apache settings to improve security
-  secureApache(settingsUsed["documentRoot"],dry=dryRun)
+  #secureApache(settingsUsed["documentRoot"],dry=dryRun)
   
-  #
-  if settingsUsed["enableSSL"]:
-    configureSSL(domainName,dry=dryRun)
-  
-  print("Wiki Admin Username:"+adminUser)
-  print("Wiki Admin password:"+adminPassWd)
+  #Configure self signed SSL cert
+  configureSSL(domainName,dry=dryRun)
 if __name__ == "__main__":
  main()
