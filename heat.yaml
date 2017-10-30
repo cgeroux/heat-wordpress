@@ -121,15 +121,15 @@ resources:
               - libssh2-1-dev
               - php-fpm
               - fail2ban
+              - software-properties-common
             write_files:
               - content: |
                   #!/bin/bash
                   
-                  WP_ADMIN_USER=ADMINUSER
+                  WP_ADMIN_USER=ADMINUSERNAME
                   WP_ADMIN_PASSWD=ADMINUSERPASS
                   WP_ADMIN_EMAIL=ADMINUSEREMAIL
                   WP_TITLE=SITETITLE
-                  
                   
                   #use this version of ssh2 for php, the 
                   #php-ssh2 package doesn't seem to work, there is a known bug with it.
@@ -281,10 +281,13 @@ resources:
               - ["git","clone","https://github.com/cgeroux/heat-wordpress.git"]
               - ["/tmp/heat-wordpress/self-signed-ssl-setup.py","SERVERADDRESS"]
               - bash /tmp/bootstrap-wp.sh
+              - ["add-apt-repository","ppa:certbot/certbot"]
+              - ["apt-get","update"]
+              - ["apt-get","install","python-certbot-apache"]
               - bash /tmp/finished.sh
           params:
             TITLE: {get_param: title}
-            ADMINUSER: {get_param: admin-user}
+            ADMINUSERNAME: {get_param: admin-user}
             ADMINUSERPASS: {get_param: admin-password}
             SERVERADDRESS: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
             ADMINUSEREMAIL: {get_param: admin-email}
