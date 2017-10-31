@@ -249,7 +249,8 @@ resources:
                   su - wp-user -c "cd /var/www/html; wp plugin install wordfence; wp plugin activate wordfence"
                   sed -i "s/auto_prepend_file =/auto_prepend_file = '/var/www/html/wordfence-waf.php'/g" /etc/php/7.0/apache2/php.ini
                   #modify permissions to allow wordfence plugin to write to wflogs
-                  su - wp-user -c "mkdir /var/www/html/wp-content/wflogs;chmod g+w /var/www/html/wp-content/wflogs"
+                  chown wp-user:www-data /var/www/html/wp-content/wflogs
+                  chmod g+w,g+s /var/www/html/wp-content/wflogs
                   
                   #install fail2ban wordpress filters
                   cp /var/www/html/wp-content/plugins/wp-fail2ban/filters.d/wordpress-hard.conf /etc/fail2ban/filter.d/
@@ -286,12 +287,12 @@ resources:
                   apt-get install -y python-certbot-apache
                   
                 path: /tmp/bootstrap-wp.sh
-                permissions: "0755"
+                permissions: "0750"
               - content: |
                   #!/bin/bash
                   wc_notify --data-binary '{"status": "SUCCESS", "reason": "wordpress server CI done"}'
                 path: /tmp/finished.sh
-                permissions: "0755"
+                permissions: "0750"
             runcmd:
               - echo -n "127.0.1.1 ">>/etc/hosts
               - cat /etc/hostname>>/etc/hosts
