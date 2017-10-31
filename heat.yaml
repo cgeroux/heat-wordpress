@@ -36,7 +36,7 @@ parameters:
     constraints:
       - length: {min: 16, max: 32 }
         description: Password length must be between 16 and 32 characters.
-      - allowed_pattern: '[a-zA-Z0-9]+'
+      - allowed_pattern: '[a-zA-Z0-9 ]+'
         description: Password must contain only letters and numbers.
   admin-email:
     type: string
@@ -126,10 +126,10 @@ resources:
               - content: |
                   #!/bin/bash
                   
-                  WP_ADMIN_USER=ADMINUSERNAME
-                  WP_ADMIN_PASSWD=ADMINUSERPASS
-                  WP_ADMIN_EMAIL=ADMINUSEREMAIL
-                  WP_TITLE=SITETITLE
+                  WP_ADMIN_USER="ADMINUSERNAME"
+                  WP_ADMIN_PASSWD="ADMINUSERPASS"
+                  WP_ADMIN_EMAIL="ADMINUSEREMAIL"
+                  WP_TITLE="SITETITLE"
                   
                   #use this version of ssh2 for php, the 
                   #php-ssh2 package doesn't seem to work, there is a known bug with it.
@@ -280,6 +280,11 @@ resources:
                   
                   systemctl restart apache2
                   
+                  #install certbot
+                  add-apt-repository ppa:certbot/certbot
+                  apt-get update
+                  apt-get install -y python-certbot-apache
+                  
                 path: /tmp/bootstrap-wp.sh
                 permissions: "0755"
               - content: |
@@ -299,7 +304,6 @@ resources:
               - ["apt-get","install","python-certbot-apache"]
               - bash /tmp/finished.sh
           params:
-            TITLE: {get_param: title}
             ADMINUSERNAME: {get_param: admin-user}
             ADMINUSERPASS: {get_param: admin-password}
             SERVERADDRESS: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
