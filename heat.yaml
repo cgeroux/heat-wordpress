@@ -133,10 +133,11 @@ resources:
                   
                   #use this version of ssh2 for php, the 
                   #php-ssh2 package doesn't seem to work, there is a known bug with it.
+                  echo "using pecl to install ssh2-1.1.2 ..."
                   pecl install ssh2-1.1.2
                   
                   #add extension to php.ini
-                  echo "addeding php-ssh2 extension to php.ini ..."
+                  echo "adding php-ssh2 extension to php.ini ..."
                   echo "extension=ssh2.so">>/etc/php/7.0/apache2/php.ini
                   
                   echo "making DB_PASSWORD ..."
@@ -240,6 +241,7 @@ resources:
                   su - wp-user -c "cd /var/www/html;wp core install --url=https://$(curl http://icanhazptr.com/) --title='$WP_TITLE' --admin_user='$WP_ADMIN_USER' --admin_password='$WP_ADMIN_PASSWD' --admin_email='$WP_ADMIN_EMAIL'"
                   
                   #install plugin to log wordpress authentication attempts
+                  echo "installing wordpress fail2ban plugin ..."
                   su - wp-user -c "cd /var/www/html; wp plugin install wp-fail2ban; wp plugin activate wp-fail2ban"
                   
                   #install fail2ban wordpress filters
