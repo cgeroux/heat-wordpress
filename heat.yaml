@@ -37,7 +37,7 @@ parameters:
       - length: {min: 16, max: 32 }
         description: Password length must be between 16 and 32 characters.
       - allowed_pattern: '[a-zA-Z0-9]+'
-        description: Password must contain only letters, numbers.
+        description: Password must contain only letters and numbers.
   admin-email:
     type: string
     label: Admin email
@@ -244,6 +244,13 @@ resources:
                   echo "installing wordpress fail2ban plugin ..."
                   su - wp-user -c "cd /var/www/html; wp plugin install wp-fail2ban; wp plugin activate wp-fail2ban"
                   
+                  #install wordfence?
+                  echo "installing wordpress wordfence plugin ..."
+                  su - wp-user -c "cd /var/www/html; wp plugin install wordfence; wp plugin activate wordfence"
+                  sed -i "s/auto_prepend_file =/auto_prepend_file = '/var/www/html/wordfence-waf.php'/g" /etc/php/7.0/apache2/php.ini
+                  #modify permissions to allow wordfence plugin to write to wflogs
+                  su - wp-user -c "mkdir /var/www/html/wp-content/wflogs;chmod g+w /var/www/html/wp-content/wflogs"
+                  
                   #install fail2ban wordpress filters
                   cp /var/www/html/wp-content/plugins/wp-fail2ban/filters.d/wordpress-hard.conf /etc/fail2ban/filter.d/
                   cp /var/www/html/wp-content/plugins/wp-fail2ban/filters.d/wordpress-soft.conf /etc/fail2ban/filter.d/
@@ -261,9 +268,13 @@ resources:
                   echo "maxretry = 5">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "port = http,https">>/etc/fail2ban/jail.d/wordpress.conf
                   
+                  #turn off repeated message reduction
+                  sed -i "s/$RepeatedMsgReduction on/$RepeatedMsgReduction off/g" /etc/rsyslog.conf
+                  
+                  service rsyslog restart
                   service fail2ban restart
                   
-                  #disable use of xmlrpc multicall function to amplify brute force attempts
+                  #disable use of xmlrpc multi call function to amplify brute force attempts
                   #this causes problems with wp cli, so must be done after all the wp cli stuff is done
                   echo "add_filter('xmlrpc_enabled', '__return_false');">>$TMP_DIR/wordpress/wp-config.php
                   
@@ -337,9 +348,6 @@ resources:
       image: {get_param: image}
       name: {get_param: volume_name}
 outputs:
-  Admin_acct_info:
-    description: 
-    value: " "
   public_ip:
     description: Floating IP address of server, can be used to ssh into server
     value: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
@@ -350,4 +358,3 @@ outputs:
         template: http://<hostip>
         params:
           <hostip>: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
-
