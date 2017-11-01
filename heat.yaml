@@ -13,11 +13,11 @@ parameter_groups:
     - flavor
     - image
     - key
+    - ssh_cidr
     - volume_name
     - volume_size
     - private_network
     - public_network
-
 parameters:
   title:
     type: string
@@ -60,9 +60,17 @@ parameters:
   key:
     type: string
     label: Key-pair name
-    description: Name of a previously generated key-pair in OpenStack to be used when connecting to the server via ssh. Usefull for performing maintance tasks.
+    description: Name of a previously generated key-pair in OpenStack to be used when connecting to the server via SSH to perform maintance tasks.
     constraints:
       - custom_constraint: nova.keypair
+  ssh_cidr:
+    type: string
+    label: IP range to allow SSH from, in CIDR format.
+    description: This restricts who can access the VM via SSH. The IP range is given using CIDR notation. This site http://ipv4.icanhazip.com/ will show your current IPv4 address. To construct a valid CIDR rule restricting access only to your current IP add "/32" to the end of your IP. The default value will restrict access from any outside addresses. This security rule can be updated later via the OpenStack dashboard: "Compute"->"Access & Security"->"wordpress_security"->"Manage Rules" in case your IP changes.
+    default: 127.0.0.1/32
+    constraints:
+      - allowed_pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(\/([0-9]|[1-2][0-9]|3[0-2]))?$'
+        description: Must be a valid CIDR value. See https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing.
   volume_name:
     type: string
     label: Volume Name
@@ -122,6 +130,7 @@ resources:
               - php-fpm
               - fail2ban
               - software-properties-common
+              - unattended-upgrades
             write_files:
               - content: |
                   #!/bin/bash
@@ -321,7 +330,10 @@ resources:
     properties:
       name: wordpress_security
       rules:
-        - remote_ip_prefix: 0.0.0.0/0
+        #maybe we don't really even need to open port 22? I suppose updates will
+        #have to be done at some point. Probably should open port 22 to a CIDR 
+        #that will manage the VM. Make that CIDR a heat template option.
+        - remote_ip_prefix: {get_param: ssh_cidr}
           protocol: tcp
           port_range_min: 22
           port_range_max: 22
