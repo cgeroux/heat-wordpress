@@ -343,7 +343,7 @@ resources:
                   
                   #disable use of xmlrpc multi call function to amplify brute force attempts
                   #this causes problems with wp cli, so must be done after all the wp cli stuff is done
-                  echo "add_filter('xmlrpc_enabled', '__return_false');">>/var/www/wordpress/wp-config.php
+                  echo "add_filter('xmlrpc_enabled', '__return_false');">>/var/www/html/wp-config.php
                   
                   systemctl restart apache2
                   
