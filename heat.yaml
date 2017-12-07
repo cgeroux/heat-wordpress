@@ -7,6 +7,7 @@ parameter_groups:
     description: Other parameters
     parameters:
     - title
+    - multi_site
     - admin-user
     - admin-password
     - admin-email
@@ -22,16 +23,16 @@ parameters:
   title:
     type: string
     label: Wordpress site name
-    description: Name of the Wordpress site
+    description: Name of the Wordpress site. This will be visible on your new site, it can be changed later if needed.
     default: "CC User Wordpress site"
   admin-user:
     type: string
     label: Admin username
-    description: The account name of the wordpress site administrator. Please do not use common administrator account names such as "Admin". Note that if you try to login once with a non-existent username you will be banned from accessing your wordpress site for a period of time.
+    description: The account name of the wordpress site administrator. Please do not use common administrator account names such as "Admin". If you try to login 2 or more times within 10 minutes with a non-existent username you will be banned from accessing your wordpress site for a period of 10 minutes.
   admin-password:
     type: string
-    label: Admin password
-    description: The password for the administrator account. It must be at least 16 characters long to a maximum of 32 characters. It can contain upper and lower case letters and numbers; no spaces are allowed. Note that if you incorrectly enter your password 6 or more times, you will be banned for a period of time from accessing your wordpress site.
+    label: Admin passphrase
+    description: The passphrase for the administrator account. It must be at least 16 characters long to a maximum of 32 characters. It can contain upper and lower case letters, numbers, and spaces. If you incorrectly enter your password 6 or more times within 10 minutes when logging into your Wordpress site you will be banned for a period of 10 minutes from accessing your wordpress site.
     hidden: true
     constraints:
       - length: {min: 16, max: 32 }
@@ -45,6 +46,11 @@ parameters:
     constraints:
       - allowed_pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         description: Must be a valid email
+  multi_site:
+    type: boolean
+    label: Multi-site
+    description: Allow multple distinct wordpress sites. If you do not need multi-site support you are strongly encouraged not to check this box.
+    default: false
   flavor:
     type: string
     label: Flavor
@@ -66,7 +72,8 @@ parameters:
   ssh_cidr:
     type: string
     label: IP range to allow SSH from, in CIDR format.
-    description: This restricts who can access the VM via SSH. The IP range is given using CIDR notation. This site http://ipv4.icanhazip.com/ will show your current IPv4 address. To construct a valid CIDR rule restricting access only to your current IP add "/32" to the end of your IP. The default value will restrict access from any outside addresses. This security rule can be updated later via the OpenStack dashboard: "Compute"->"Access & Security"->"wordpress_security"->"Manage Rules" in case your IP changes.
+    description: >-
+      This restricts who can access the VM via SSH. The IP range is given using CIDR notation. This site http://ipv4.icanhazip.com/ will show your current IPv4 address. To construct a valid CIDR rule restricting access only to your current IP add "/32" to the end of your IP. The default value will restrict access from any outside addresses. This security rule can be updated later via the OpenStack dashboard: "Compute"->"Access & Security"->"wordpress_security"->"Manage Rules" in case your IP changes or you left the default value and later require access to the VM via SSH.
     default: 127.0.0.1/32
     constraints:
       - allowed_pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(\/([0-9]|[1-2][0-9]|3[0-2]))?$'
@@ -130,7 +137,6 @@ resources:
               - php-fpm
               - fail2ban
               - software-properties-common
-              - unattended-upgrades
             write_files:
               - content: |
                   #!/bin/bash
@@ -268,7 +274,7 @@ resources:
                   echo "enabled = true">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "filter = wordpress-hard">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "logpath = /var/log/auth.log">>/etc/fail2ban/jail.d/wordpress.conf
-                  echo "maxretry = 1">>/etc/fail2ban/jail.d/wordpress.conf
+                  echo "maxretry = 2">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "port = http,https">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "">>/etc/fail2ban/jail.d/wordpress.conf
                   echo "[wordpress-soft]">>/etc/fail2ban/jail.d/wordpress.conf
@@ -279,18 +285,69 @@ resources:
                   echo "port = http,https">>/etc/fail2ban/jail.d/wordpress.conf
                   
                   #turn off repeated message reduction
+                  #wondering if there is an error with this line, getting:
+                  #206.167.181.182
                   sed -i "s/$RepeatedMsgReduction on/$RepeatedMsgReduction off/g" /etc/rsyslog.conf
                   
                   service rsyslog restart
                   service fail2ban restart
                   
+                  #Multi-site?
+                  if [ MULTISITESETUP = "True" ]; then
+                    echo "Configuring for multi-site Wordpress ..."
+                    echo "  Installing and configuring sendmail ..."
+                    #install sendmail, which is required to have users setup and create their own wordpress sites
+                    apt-get install sendmail -y
+                    
+                    #To enable sendmail to use STARTTLS, you need to:
+                    #1) Add this line to /etc/mail/sendmail.mc and optionally
+                    #   to /etc/mail/submit.mc:
+                    #  include(`/etc/mail/tls/starttls.m4')dnl
+                    echo "include(\`/etc/mail/tls/starttls.m4')dnl" >>/etc/mail/sendmail.mc
+                    echo "include(\`/etc/mail/tls/starttls.m4')dnl" >>/etc/mail/submit.mc
+                    
+                    #sudo sendmailconfig (answer 'Y' to all questions)
+                    sendmailconfig<<EOF
+                  Y
+                  Y
+                  Y
+                  EOF
+                    
+                    service sendmail restart
+                    
+                    #these need to be run as wp-user
+                    su - wp-user -c "cd /var/www/html;wp plugin deactivate --all"
+                    su - wp-user -c "cd /var/www/html;wp core multisite-install --title='$WP_TITLE' --admin_email='$WP_ADMIN_EMAIL'"
+                    
+                    #
+                    #need to have apache rewrite module enabled
+                    a2enmod rewrite
+                    
+                    #
+                    #sudo vim /etc/apache2/apache2.conf
+                    #set AllowOverride to ALL for document root
+                    #this allows the provided .htaccess file from wordpress to be applied
+                    perl -i -0pe 's~<Directory /var/www/>\n\tOptions Indexes FollowSymLinks\n\tAllowOverride None\n~<Directory /var/www/>\n\tOptions Indexes FollowSymLinks\n\tAllowOverride ALL\n~' /etc/apache2/apache2.conf
+                    
+                    #sudo vim /var/www/html/wp-config.php
+                    #add the line
+                    #define( 'WP_ALLOW_MULTISITE', true );
+                    perl -i -0pe "s~define\('WP_DEBUG', false\);\r\n~define('WP_DEBUG', false);\r\ndefine( 'WP_ALLOW_MULTISITE', true );\r\ndefine('MULTISITE', true);\r\ndefine('SUBDOMAIN_INSTALL', false);\r\ndefine('DOMAIN_CURRENT_SITE', '$(curl icanhazptr.com)');\r\ndefine('PATH_CURRENT_SITE', '/');\r\ndefine('SITE_ID_CURRENT_SITE', 1);\r\ndefine('BLOG_ID_CURRENT_SITE', 1);~" /var/www/html/wp-config.php
+                    
+                    #create .htaccess file
+                    echo -e 'RewriteEngine On\nRewriteBase /\nRewriteRule ^index\.php$ - [L]\n\n# add a trailing slash to /wp-admin\nRewriteRule ^([_0-9a-zA-Z-]+/)?wp-admin$ $1wp-admin/ [R=301,L]\n\nRewriteCond %{REQUEST_FILENAME} -f [OR]\nRewriteCond %{REQUEST_FILENAME} -d\nRewriteRule ^ - [L]\nRewriteRule ^([_0-9a-zA-Z-]+/)?(wp-(content|admin|includes).*) $2 [L]\nRewriteRule ^([_0-9a-zA-Z-]+/)?(.*\.php)$ $2 [L]\nRewriteRule . index.php [L]'>/var/www/html/.htaccess
+                    
+                    su - wp-user -c "cd /var/www/html;wp plugin activate wordfence"
+                    su - wp-user -c "cd /var/www/html;wp plugin activate wp-fail2ban"
+                  fi
+                  
                   #disable use of xmlrpc multi call function to amplify brute force attempts
                   #this causes problems with wp cli, so must be done after all the wp cli stuff is done
-                  echo "add_filter('xmlrpc_enabled', '__return_false');">>$TMP_DIR/wordpress/wp-config.php
+                  echo "add_filter('xmlrpc_enabled', '__return_false');">>/var/www/wordpress/wp-config.php
                   
                   systemctl restart apache2
                   
-                  #install certbot
+                  #install certbot (nice to have later when adding own SSL certs)
                   add-apt-repository ppa:certbot/certbot
                   apt-get update
                   apt-get install -y python-certbot-apache
@@ -303,8 +360,8 @@ resources:
                 path: /tmp/finished.sh
                 permissions: "0750"
             runcmd:
-              - echo -n "127.0.1.1 ">>/etc/hosts
-              - cat /etc/hostname>>/etc/hosts
+              #the below few lines might need some modifications e.g. maybe curl icanhazptr.com
+              - echo "$(curl ipv4.icanhazip.com) $(curl icanhazptr.com) $(cat /etc/hostname)">>/etc/hosts
               - ["cd","/tmp"]
               - ["git","clone","https://github.com/cgeroux/heat-wordpress.git"]
               - ["/tmp/heat-wordpress/self-signed-ssl-setup.py","SERVERADDRESS"]
@@ -319,6 +376,7 @@ resources:
             SERVERADDRESS: { get_attr: [ wordpress_floating_ip, floating_ip_address ] }
             ADMINUSEREMAIL: {get_param: admin-email}
             SITETITLE: {get_param: title}
+            MULTISITESETUP: {get_param: multi_site}
             wc_notify: {get_attr: ['wordpress_wait_handle','curl_cli']}
   wordpress_port:
     type: OS::Neutron::Port
