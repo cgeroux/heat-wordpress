@@ -146,6 +146,10 @@ resources:
                   WP_ADMIN_EMAIL="ADMINUSEREMAIL"
                   WP_TITLE="SITETITLE"
                   
+                  #set apache server name
+                  echo "ServerName $(curl http://icanhazptr.com/)">>/etc/apache2/apache2.conf
+                  service apache2 restart
+                  
                   #use this version of ssh2 for php, the 
                   #php-ssh2 package doesn't seem to work, there is a known bug with it.
                   echo "using pecl to install ssh2-1.1.2 ..."
@@ -261,13 +265,21 @@ resources:
                   
                   #install wordfence?
                   echo "installing wordpress wordfence plugin ..."
-                  su - wp-user -c "cd /var/www/html; wp plugin install wordfence; wp plugin activate wordfence"
-                  sed -i "s/auto_prepend_file =/auto_prepend_file = '/var/www/html/wordfence-waf.php'/g" /etc/php/7.0/apache2/php.ini
-                  #modify permissions to allow wordfence plugin to write to wflogs
+                  #make wflogs directory before plugin created to set permissions
+                  #files created during the install should then get the write permissions
+                  mkdir -p /var/www/html/wp-content/wflogs
                   chown wp-user:www-data /var/www/html/wp-content/wflogs
                   chmod g+w,g+s /var/www/html/wp-content/wflogs
+                  touch /var/www/html/wordfence-waf.php
+                  chown wp-user:www-data /var/www/html/wordfence-waf.php
+                  chmod g+w /var/www/html/wordfence-waf.php
+                  echo "auto_prepend_file = '/var/www/html/wordfence-waf.php'" >>/etc/php/7.0/apache2/php.ini
+                  su - wp-user -c "cd /var/www/html; wp plugin install wordfence; wp plugin activate wordfence"
+                  sed -i "s/auto_prepend_file =/auto_prepend_file = '/var/www/html/wordfence-waf.php'/g" /etc/php/7.0/apache2/php.ini
+                  
                   
                   #install fail2ban wordpress filters
+                  echo "setting up fail2ban wordpress filters ..."
                   cp /var/www/html/wp-content/plugins/wp-fail2ban/filters.d/wordpress-hard.conf /etc/fail2ban/filter.d/
                   cp /var/www/html/wp-content/plugins/wp-fail2ban/filters.d/wordpress-soft.conf /etc/fail2ban/filter.d/
                   echo "[wordpress-hard]">/etc/fail2ban/jail.d/wordpress.conf
@@ -285,8 +297,7 @@ resources:
                   echo "port = http,https">>/etc/fail2ban/jail.d/wordpress.conf
                   
                   #turn off repeated message reduction
-                  #wondering if there is an error with this line, getting:
-                  #206.167.181.182
+                  echo "turn off repeated message reduction ..."
                   sed -i "s/$RepeatedMsgReduction on/$RepeatedMsgReduction off/g" /etc/rsyslog.conf
                   
                   service rsyslog restart
@@ -337,8 +348,8 @@ resources:
                     #create .htaccess file
                     echo -e 'RewriteEngine On\nRewriteBase /\nRewriteRule ^index\.php$ - [L]\n\n# add a trailing slash to /wp-admin\nRewriteRule ^([_0-9a-zA-Z-]+/)?wp-admin$ $1wp-admin/ [R=301,L]\n\nRewriteCond %{REQUEST_FILENAME} -f [OR]\nRewriteCond %{REQUEST_FILENAME} -d\nRewriteRule ^ - [L]\nRewriteRule ^([_0-9a-zA-Z-]+/)?(wp-(content|admin|includes).*) $2 [L]\nRewriteRule ^([_0-9a-zA-Z-]+/)?(.*\.php)$ $2 [L]\nRewriteRule . index.php [L]'>/var/www/html/.htaccess
                     
-                    su - wp-user -c "cd /var/www/html;wp plugin activate wordfence"
-                    su - wp-user -c "cd /var/www/html;wp plugin activate wp-fail2ban"
+                    su - wp-user -c "cd /var/www/html;wp plugin activate wordfence --network"
+                    su - wp-user -c "cd /var/www/html;wp plugin activate wp-fail2ban --network"
                   fi
                   
                   #disable use of xmlrpc multi call function to amplify brute force attempts
